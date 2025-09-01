@@ -5,9 +5,7 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from my_backend import models
 from my_backend import database
-
 from typing import List
-
 
 app = FastAPI()
 notifications = []
@@ -34,6 +32,11 @@ def get_db():
 
 
 # ---------------- Pydantic Schemas ---------------- #
+
+class AdminSignupRequest(BaseModel):
+    username: str
+    phone: str
+    password: str
 
 class AdminLoginRequest(BaseModel):
     username: str
@@ -69,11 +72,35 @@ class LeaveRequestResponse(BaseModel):
     created_at: datetime    
 
 
-# ---------------- Routes ---------------- #
+# ---------------- Admin Signup ----------------
+@app.post("/signup/admin")
+def signup_admin(request: AdminSignupRequest, db: Session = Depends(get_db)):
+    # Check if phone already exists
+    existing_admin = db.query(models.User).filter(models.User.phone == request.phone).first()
+    if existing_admin:
+        raise HTTPException(status_code=400, detail="Phone already registered")
+
+    new_admin = models.User(
+        username=request.username,
+        phone=request.phone,
+        password=request.password,
+        role="admin"
+    )
+    db.add(new_admin)
+    db.commit()
+    db.refresh(new_admin)
+
+    return {
+        "message": "Admin registered successfully",
+        "userId": new_admin.id,
+        "username": new_admin.username,
+        "phone": new_admin.phone,
+        "role": new_admin.role
+    }
+
 
 # ---------------- Leave Routes ----------------
 
-# ✅ Submit leave request (user → admin)
 @app.post("/notify-admin", response_model=LeaveRequestResponse)
 def notify_admin(request: NotificationRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.id == request.user_id).first()
@@ -93,7 +120,6 @@ def notify_admin(request: NotificationRequest, db: Session = Depends(get_db)):
     return leave_request
 
 
-# ✅ Get all pending leave requests (for admin dashboard)
 @app.get("/leave-requests/pending", response_model=List[LeaveRequestResponse])
 def get_pending_leave_requests(db: Session = Depends(get_db)):
     pending_requests = db.query(models.LeaveRequest).filter(
@@ -102,7 +128,6 @@ def get_pending_leave_requests(db: Session = Depends(get_db)):
     return pending_requests
 
 
-# ✅ Approve leave
 @app.post("/leave-requests/{leave_id}/approve")
 def approve_leave(leave_id: int, db: Session = Depends(get_db)):
     leave_request = db.query(models.LeaveRequest).filter(models.LeaveRequest.id == leave_id).first()
@@ -113,7 +138,6 @@ def approve_leave(leave_id: int, db: Session = Depends(get_db)):
     return {"message": f"Leave approved for {leave_request.username}"}
 
 
-# ✅ Reject leave
 @app.post("/leave-requests/{leave_id}/reject")
 def reject_leave(leave_id: int, db: Session = Depends(get_db)):
     leave_request = db.query(models.LeaveRequest).filter(models.LeaveRequest.id == leave_id).first()
@@ -124,7 +148,8 @@ def reject_leave(leave_id: int, db: Session = Depends(get_db)):
     return {"message": f"Leave rejected for {leave_request.username}"}
 
 
-# ✅ Admin login
+# ---------------- Login Routes ----------------
+
 @app.post("/login/admin")
 def login_admin(request: AdminLoginRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(
@@ -144,7 +169,6 @@ def login_admin(request: AdminLoginRequest, db: Session = Depends(get_db)):
     }
 
 
-# ✅ User login
 @app.post("/login/user")
 def login_user(request: UserLoginRequest, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(
@@ -164,10 +188,10 @@ def login_user(request: UserLoginRequest, db: Session = Depends(get_db)):
     }
 
 
-# ✅ User Signup
+# ---------------- User Signup ----------------
+
 @app.post("/signup/user")
 def signup_user(request: UserSignupRequest, db: Session = Depends(get_db)):
-    # check duplicate phone
     existing_user = db.query(models.User).filter(models.User.phone == request.phone).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Phone already registered")
@@ -190,14 +214,14 @@ def signup_user(request: UserSignupRequest, db: Session = Depends(get_db)):
     }
 
 
-# ✅ Get all users (only users, not admins)
-@app.get("/users") 
+# ---------------- User / Leave Utilities ----------------
+
+@app.get("/users")
 def get_users(db: Session = Depends(get_db)):
     users = db.query(models.User).filter(models.User.role == "user").all()
     return users
 
 
-# ✅ Get assigned time for a specific user
 @app.get("/users/{user_id}/assigned_time")
 def get_assigned_time(user_id: int, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.id == user_id).first()
@@ -206,10 +230,8 @@ def get_assigned_time(user_id: int, db: Session = Depends(get_db)):
     return {"assigned_time": user.assigned_time}
 
 
-# ✅ Assign time to a user
 @app.post("/assign-time")
 def assign_time(request: AssignTimeRequest, db: Session = Depends(get_db)):
-    # Parse "HH:MM" into today's datetime
     try:
         time_obj = datetime.strptime(request.time, "%H:%M").time()
         full_datetime = datetime.combine(date.today(), time_obj)
@@ -226,6 +248,7 @@ def assign_time(request: AssignTimeRequest, db: Session = Depends(get_db)):
 
     return {"message": f"Assigned time {full_datetime} to user {user.username}"}
 
+
 @app.get("/leave-requests/status/{user_id}", response_model=LeaveRequestResponse)
 def get_latest_leave_request_by_user(user_id: int, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.id == user_id).first()
@@ -235,7 +258,7 @@ def get_latest_leave_request_by_user(user_id: int, db: Session = Depends(get_db)
     latest_leave_request = (
         db.query(models.LeaveRequest)
         .filter(models.LeaveRequest.user_id == user_id)
-        .order_by(models.LeaveRequest.created_at.desc())  # ✅ use created_at
+        .order_by(models.LeaveRequest.created_at.desc())
         .first()
     )
 
