@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Time, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
-from database import Base
+from my_backend.database import Base
 from datetime import datetime
 
 class LeaveRequest(Base):
