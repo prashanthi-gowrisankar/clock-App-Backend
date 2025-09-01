@@ -3,8 +3,9 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-import models
-import database
+from my_backend import models
+from my_backend import database
+
 from typing import List
 
 
