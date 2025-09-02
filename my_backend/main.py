@@ -98,7 +98,15 @@ def signup_admin(request: AdminSignupRequest, db: Session = Depends(get_db)):
         "role": new_admin.role
     }
 
+@app.delete("/users/{user_id}")
+def delete_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
 
+    db.delete(user)
+    db.commit()
+    return {"message": f"User {user.username} (ID: {user.id}) deleted successfully"}
 # ---------------- Leave Routes ----------------
 
 @app.post("/notify-admin", response_model=LeaveRequestResponse)
